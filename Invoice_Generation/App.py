@@ -1,13 +1,110 @@
 
+# import streamlit as st
+# import tempfile
+# import os
+# import re
+# import zipfile
+# from typing import List
+# from pydantic import BaseModel, validator, Field
+# import ollama
+# import pandas as pd
+
+# # Define Pydantic models with validation
+# class Item(BaseModel):
+#     name: str
+#     quantity: int
+#     price: float
+    
+#     @validator('price', pre=True)
+#     def clean_price(cls, value):
+#         if isinstance(value, str):
+#             cleaned = re.sub(r'[^\d.]', '', value)
+#             try:
+#                 return float(cleaned)
+#             except ValueError:
+#                 cleaned = cleaned.replace(',', '.')
+#                 return float(cleaned)
+#         return value
+
+# class Invoice(BaseModel):
+#     invoice_number: str = Field(..., alias="invoice_number")
+#     date: str
+#     vendor_name: str = Field(..., alias="vendor_name")
+#     items: List[Item]
+#     total: float
+    
+#     @validator('total', pre=True)
+#     def clean_total(cls, value):
+#         if isinstance(value, str):
+#             cleaned = re.sub(r'[^\d.]', '', value)
+#             try:
+#                 return float(cleaned)
+#             except ValueError:
+#                 cleaned = cleaned.replace(',', '.')
+#                 return float(cleaned)
+#         return value
+
+# def get_invoice(image_path):
+#     """Extract invoice data from image using Ollama"""
+#     try:
+#         res = ollama.chat(
+#             model="llama3.2-vision:11b",
+#             messages=[
+#                 {
+#                     'role': 'user',
+#                     'content': """Extract invoice details as valid JSON with this exact structure:
+#                     {
+#                         "invoice_number": "string",
+#                         "date": "string",
+#                         "vendor_name": "string",
+#                         "items": [
+#                             {
+#                                 "name": "string",
+#                                 "quantity": integer,
+#                                 "price": float
+#                             }
+#                         ],
+#                         "total": float
+#                     }
+#                     Ensure numeric values don't have any special characters"""
+#                     ,
+#                     'images': [image_path]
+#                 }
+#             ],
+#             format="json",
+#             options={'temperature': 0}
+#         )
+        
+#         json_response = res['message']['content']
+#         json_response = json_response.replace("'", '"')
+#         json_response = re.sub(r'(\d+),(\d+)', r'\1.\2', json_response)
+        
+#         return Invoice.model_validate_json(json_response)
+        
+#     except Exception as e:
+#         st.error(f"Error processing image: {str(e)}")
+#         return None
+
+
+# if __name__ == "__main__":
+#     main()
+
+// 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
+
+
 import streamlit as st
 import tempfile
 import os
 import re
 import zipfile
+import base64
 from typing import List
 from pydantic import BaseModel, validator, Field
-import ollama
+from groq import Groq
 import pandas as pd
+
+# Initialize Groq client
+client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
 
 # Define Pydantic models with validation
 class Item(BaseModel):
@@ -44,38 +141,50 @@ class Invoice(BaseModel):
                 return float(cleaned)
         return value
 
+def encode_image(image_path):
+    with open(image_path, "rb") as image_file:
+        return base64.b64encode(image_file.read()).decode('utf-8')
+
 def get_invoice(image_path):
-    """Extract invoice data from image using Ollama"""
+    """Extract invoice data from image using Groq API"""
     try:
-        res = ollama.chat(
-            model="llama3.2-vision:11b",
+        base64_image = encode_image(image_path)
+        
+        chat_completion = client.chat.completions.create(
             messages=[
                 {
-                    'role': 'user',
-                    'content': """Extract invoice details as valid JSON with this exact structure:
-                    {
-                        "invoice_number": "string",
-                        "date": "string",
-                        "vendor_name": "string",
-                        "items": [
-                            {
-                                "name": "string",
-                                "quantity": integer,
-                                "price": float
-                            }
-                        ],
-                        "total": float
-                    }
-                    Ensure numeric values don't have any special characters"""
-                    ,
-                    'images': [image_path]
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": """Extract invoice details as valid JSON with this exact structure:
+                        {
+                            "invoice_number": "string",
+                            "date": "string",
+                            "vendor_name": "string",
+                            "items": [
+                                {
+                                    "name": "string",
+                                    "quantity": integer,
+                                    "price": float
+                                }
+                            ],
+                            "total": float
+                        }
+                        Ensure numeric values don't have any special characters. Use double quotes for strings."""},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{base64_image}",
+                            },
+                        },
+                    ],
                 }
             ],
-            format="json",
-            options={'temperature': 0}
+            model="llama-3.2-11b-vision-preview",
+            temperature=0,
+            response_format={"type": "json_object"}
         )
         
-        json_response = res['message']['content']
+        json_response = chat_completion.choices[0].message.content
         json_response = json_response.replace("'", '"')
         json_response = re.sub(r'(\d+),(\d+)', r'\1.\2', json_response)
         
